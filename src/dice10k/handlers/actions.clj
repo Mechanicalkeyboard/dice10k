@@ -6,6 +6,7 @@
              [rules :as rules]
              [scoring :as scoring]
              [state :as state]]
+            [clojure.math.combinatorics :as combo]
             [dice10k.handlers.games :as games]))
 
 (defn my-turn? [game-id player-id]
@@ -37,14 +38,12 @@
 ;;;;;;;;;;;;;
 (defmethod update-game-state :pre-roll
   [{:keys [game-id steal ice-broken? turn-seq] :as params}]
-  (log/info "param" params)
   (cond
     (and steal ice-broken?) (log/info "Steal Occurred, no score-flush" (assoc params :game (games/get-game game-id)))
     (and (zero? turn-seq)
          (not steal)) (state/score-flush game-id)
     (and (zero? turn-seq) (not ice-broken?)) (state/score-flush game-id)
-    :else (log/info "No condition met, did not score-flush" (assoc params :game (games/get-game game-id))))
-  )
+    :else (log/info "No condition met, did not score-flush" (assoc params :game (games/get-game game-id)))))
 (defmethod update-game-state :roll
   [{:keys [game-id player-id roll-vec bust?] :as params}]
   (if bust?
@@ -81,12 +80,28 @@
                              :player-id player-id
                              :params params
                              :game (games/get-game game-id :safe false)})
-  (if-let [msg (roll-precond-fail-msg game-id player-id steal)]
+  (def pending-dice (get (games/get-game game-id) :pending-dice))
+  (def pending-points (get(games/get-game game-id :safe false) :pending-points))
+  (def points (get (get (games/get-player game-id player-id) :body) :points))
+;  (def points (get-in (games/get-game game-id :safe false) [:points] 0))
+  (def roll-result (dice/roll pending-dice))
+  (log/info "game State" (games/get-game game-id :safe false) )
+  (log/info "map:" {:vals (map scoring/eval-points (combo/subsets roll-result))})
+  (log/info "things" {:pending-dice pending-dice
+                      :pending-points pending-points
+                      :points points
+                      :roll-result roll-result})
+  (if-let [msg (roll-precond-fail-msg game-id player-id steal) ]
     (resp/fail {:message msg})
     (let [{:keys [pending-dice]} (games/get-game game-id)
           roll-result (dice/roll pending-dice)
-          bust? (scoring/bust? roll-result)
-          msg (if bust? "You Busted!" "Pick Keepers!")]
+
+          bust? (zero? (count (reduce-kv (fn [m k v]
+                                           (if (and (pos? (get v :roll-points)) (< (+ pending-points points (get v :roll-points)) rules/winning-score))
+                                             (conj m (v :roll-points))
+                                             m))
+                                         [] (vec (map scoring/eval-points (combo/subsets roll-result))))))
+          msg (if bust? "BUSTED: You Busted!" "Pick Keepers!")]
       (update-game-state {:type :roll
                           :game-id game-id
                           :player-id player-id
@@ -121,7 +136,6 @@
   (state/update-game-val game-id :pending-dice pending-dice)
   (log/info "Updated Game State post-keep" (assoc params :game (games/get-game game-id))))
 
-
 (defn keep-precond-fail-msg [game-id player-id keepers]
   (let [player (-> game-id
                    (games/get-game :safe false)
@@ -144,7 +158,7 @@
           partitioned-keepers (scoring/partition-keepers roll-vec keepers)
           fail-message (cond
                          (not partitioned-keepers) "Make a selection from the dice in your roll"
-                         (scoring/bust? keepers) "Must pick at least one scoring die")]
+                         (scoring/bust? keepers) "PICK FAIL: Must pick at least one scoring die")]
       (if fail-message
         (resp/fail {:message fail-message
                     :roll roll-vec})
@@ -152,7 +166,7 @@
               pending-points (+ roll-points pending-points)]
           (if (> pending-points rules/winning-score)
             (resp/fail (assoc (games/get-game game-id)
-                              :message (format "I can't let you do that, %s. It would put you over, at %s points"
+                              :message (format "PICK FAIL: I can't let you do that, %s. It would put you over, at %s points"
                                                name pending-points)))
             (do (update-game-state {:type :keep
                                     :pending-dice (if (zero? pending-dice)
