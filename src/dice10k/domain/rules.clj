@@ -2,4 +2,4 @@
 
 (def num-dice 6)
 
-(def winning-score 10000)
+(def winning-score 3000)

@@ -164,8 +164,15 @@
                     :roll roll-vec})
         (let [{:keys [roll-points pending-dice]} (scoring/partition-points partitioned-keepers)
               pending-points (+ roll-points pending-points)]
-          (if (> pending-points rules/winning-score)
+          (def points (get (get (games/get-player game-id player-id) :body) :points))
+          (log/info "point summary" {
+                                      :points points
+                                      :pending-points pending-points
+                                      :total (+ roll-points points pending-points)
+                                      })
+          (if (> (+ points pending-points) rules/winning-score)
             (resp/fail (assoc (games/get-game game-id)
+                              :roll roll-vec
                               :message (format "PICK FAIL: I can't let you do that, %s. It would put you over, at %s points"
                                                name pending-points)))
             (do (update-game-state {:type :keep
