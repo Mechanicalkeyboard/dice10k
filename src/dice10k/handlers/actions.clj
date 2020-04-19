@@ -81,7 +81,8 @@
                              :params params
                              :game (games/get-game game-id :safe false)})
   (def pending-dice (get (games/get-game game-id) :pending-dice))
-  (def pending-points (get(games/get-game game-id :safe false) :pending-points))
+;  put ypu over cause you are not
+  (def pending-points  (get (get (games/get-player game-id player-id) :body) :pending-points))
   (def points (get (get (games/get-player game-id player-id) :body) :points))
 ;  (def points (get-in (games/get-game game-id :safe false) [:points] 0))
   (def roll-result (dice/roll pending-dice))
@@ -97,7 +98,7 @@
           roll-result (dice/roll pending-dice)
 
           bust? (zero? (count (reduce-kv (fn [m k v]
-                                           (if (and (pos? (get v :roll-points)) (< (+ pending-points points (get v :roll-points)) rules/winning-score))
+                                           (if (and (pos? (get v :roll-points)) (<= (+ pending-points points (get v :roll-points)) rules/winning-score))
                                              (conj m (v :roll-points))
                                              m))
                                          [] (vec (map scoring/eval-points (combo/subsets roll-result))))))
